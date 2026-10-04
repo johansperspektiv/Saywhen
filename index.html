@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#111315" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <title>Snabbkalender</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0d0f10;--panel:#171a1c;--text:#f5f7f7;--muted:#aeb6b9;--red:#d62828;--green:#2a9d58;--amber:#e39a18;--line:#2a2e31}
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+    body{margin:0;min-height:100dvh;background:radial-gradient(circle at 50% 28%,#1a1d20 0,#0d0f10 55%);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:var(--text);display:grid;place-items:center}
+    main{width:min(100%,520px);min-height:100dvh;padding:max(22px,env(safe-area-inset-top)) 22px max(28px,env(safe-area-inset-bottom));display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px}
+    .top{position:absolute;top:max(18px,env(safe-area-inset-top));left:20px;right:20px;display:flex;justify-content:space-between;align-items:center}
+    .brand{font-weight:750;letter-spacing:.2px}.account{font-size:13px;color:var(--muted);max-width:58%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .orb{width:min(72vw,330px);aspect-ratio:1;border-radius:50%;border:0;color:white;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;box-shadow:0 22px 70px #0009, inset 0 0 0 1px #ffffff16;transition:.2s transform,.25s background;cursor:pointer;padding:30px;text-align:center}
+    .orb:active{transform:scale(.975)}
+    .orb.red{background:linear-gradient(145deg,#ef3a35,#b7191f)} .orb.green{background:linear-gradient(145deg,#38b768,#197d43)} .orb.amber{background:linear-gradient(145deg,#f0aa2d,#bd6e05)} .orb.neutral{background:linear-gradient(145deg,#3b4247,#202427)}
+    .mic{font-size:72px;line-height:1}.big{font-size:28px;font-weight:800;line-height:1.05}.date{font-size:20px;font-weight:650;opacity:.96}.small{font-size:15px;opacity:.9;line-height:1.35}
+    .actions{display:flex;gap:12px;min-height:52px;align-items:center;justify-content:center;flex-wrap:wrap}
+    button.secondary{border:1px solid var(--line);background:#171a1c;color:var(--text);border-radius:14px;padding:14px 20px;font-size:16px;font-weight:700;cursor:pointer}
+    button.secondary.danger{color:#ffb4b4}.hint{color:var(--muted);font-size:14px;text-align:center;max-width:360px;min-height:38px}
+    dialog{border:1px solid var(--line);border-radius:18px;background:#15181a;color:var(--text);padding:22px;max-width:420px;width:calc(100% - 36px)}
+    dialog::backdrop{background:#000a} input{width:100%;margin:12px 0 18px;background:#0f1112;color:#fff;border:1px solid #343a3e;border-radius:12px;padding:13px;font-size:16px}
+    .settings{position:absolute;bottom:max(18px,env(safe-area-inset-bottom));font-size:13px;color:#8f989c;background:transparent;border:0;text-decoration:underline;cursor:pointer}
+    .hidden{display:none!important}
+  </style>
+</head>
+<body>
+<main>
+  <div class="top"><div class="brand">Snabbkalender</div><div id="account" class="account">Inte ansluten</div></div>
+  <button id="orb" class="orb red" aria-label="Tryck och prata">
+    <div id="orbIcon" class="mic">🎙️</div>
+    <div id="orbTitle" class="big">Tryck och prata</div>
+    <div id="orbDate" class="date"></div>
+    <div id="orbSmall" class="small"></div>
+  </button>
+  <div id="actions" class="actions"></div>
+  <div id="hint" class="hint">Säg till exempel: “Besiktning 14 oktober klockan 10.”</div>
+  <button id="settingsBtn" class="settings">Inställningar</button>
+</main>
+<dialog id="settingsDialog">
+  <form method="dialog">
+    <h2 style="margin-top:0">Inställningar</h2>
+    <label>Microsoft App-ID (Client ID)</label>
+    <input id="clientIdInput" autocomplete="off" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+    <div style="font-size:13px;color:#aeb6b9;line-height:1.45">Appen använder Outlooks standardkalender. Client ID sparas bara på den här enheten.</div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
+      <button class="secondary" value="cancel">Avbryt</button>
+      <button id="saveSettings" class="secondary" value="default">Spara</button>
+    </div>
+  </form>
+</dialog>
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@4.25.0/lib/msal-browser.min.js"></script>
+<script>
+const $=s=>document.querySelector(s);
+const orb=$('#orb'), actions=$('#actions'), hint=$('#hint'), accountEl=$('#account');
+const state={msal:null,account:null,lastCreated:null,pending:null,listening:false};
+const GRAPH='https://graph.microsoft.com/v1.0';
+const scopes=['User.Read','Calendars.ReadWrite'];
+
+function setOrb(kind, title, date='', small='', icon=''){
+  orb.className='orb '+kind; $('#orbTitle').textContent=title; $('#orbDate').textContent=date; $('#orbSmall').textContent=small;
+  $('#orbIcon').textContent=icon || (kind==='red'?'🎙️':kind==='green'?'✓':kind==='amber'?'⚠':'…');
+}
+function setActions(items=[]){ actions.innerHTML=''; items.forEach(({label,cls='',fn})=>{const b=document.createElement('button');b.className='secondary '+cls;b.textContent=label;b.onclick=fn;actions.appendChild(b);}); }
+function resetUI(){state.pending=null;setOrb('red','Tryck och prata');setActions();hint.textContent='Säg till exempel: “Besiktning 14 oktober klockan 10.”';}
+
+async function initMsal(){
+  const clientId=localStorage.getItem('clientId'); if(!clientId){accountEl.textContent='Outlook ej kopplad';return;}
+  try{
+    state.msal=new msal.PublicClientApplication({auth:{clientId,authority:'https://login.microsoftonline.com/common',redirectUri:location.origin+location.pathname},cache:{cacheLocation:'localStorage'}});
+    await state.msal.initialize();
+    const accts=state.msal.getAllAccounts(); if(accts[0]){state.account=accts[0];accountEl.textContent=accts[0].username;}
+    else accountEl.textContent='Tryck mikrofonen för att logga in';
+  }catch(e){console.error(e);accountEl.textContent='Fel i Microsoft-inställning';}
+}
+async function ensureLogin(){
+  if(!state.msal){$('#settingsDialog').showModal();throw new Error('Microsoft App-ID saknas');}
+  if(!state.account){const r=await state.msal.loginPopup({scopes});state.account=r.account;accountEl.textContent=r.account.username;}
+  return state.account;
+}
+async function token(){
+  await ensureLogin(); try{return (await state.msal.acquireTokenSilent({scopes,account:state.account})).accessToken}
+  catch{return (await state.msal.acquireTokenPopup({scopes,account:state.account})).accessToken}
+}
+async function graph(path,opts={}){
+  const t=await token(); const res=await fetch(GRAPH+path,{...opts,headers:{Authorization:'Bearer '+t,'Content-Type':'application/json',...(opts.headers||{})}});
+  if(!res.ok) throw new Error((await res.text())||('HTTP '+res.status));
+  return res.status===204?null:res.json();
+}
+
+const months={januari:0,februari:1,mars:2,april:3,maj:4,juni:5,juli:6,augusti:7,september:8,oktober:9,november:10,december:11};
+const weekdays={söndag:0,måndag:1,tisdag:2,onsdag:3,torsdag:4,fredag:5,lördag:6};
+function nextWeekday(base,target,forceNext=false){let d=new Date(base);let add=(target-d.getDay()+7)%7;if(add===0||forceNext)add+=7;d.setDate(d.getDate()+add);return d;}
+function cleanTitle(text){
+  let s=text.toLowerCase();
+  s=s.replace(/\b(idag|imorgon|i morgon|övermorgon|nästa\s+(måndag|tisdag|onsdag|torsdag|fredag|lördag|söndag)|måndag|tisdag|onsdag|torsdag|fredag|lördag|söndag)\b/gi,' ');
+  s=s.replace(/\b\d{1,2}(?:[\/.\-]\d{1,2})(?:[\/.\-]\d{2,4})?\b/g,' ');
+  s=s.replace(new RegExp('\\b\\d{1,2}\\s+('+Object.keys(months).join('|')+')(?:\\s+\\d{4})?\\b','gi'),' ');
+  s=s.replace(/\b(klockan|kl\.?|vid)\s*\d{1,2}(?:[:\.]\d{2})?\b/gi,' ');
+  s=s.replace(/\bfrån\s+\d{1,2}(?:[:\.]\d{2})?\s+(?:till|-)\s+\d{1,2}(?:[:\.]\d{2})?\b/gi,' ');
+  s=s.replace(/\b(?:i|under)\s+\d+(?:[,.]\d+)?\s*(?:timme|timmar|minut|minuter)\b/gi,' ');
+  s=s.replace(/\s+/g,' ').trim().replace(/^[,.;:\- ]+|[,.;:\- ]+$/g,'');
+  return s? s.charAt(0).toUpperCase()+s.slice(1) : 'Ny aktivitet';
+}
+function parseSwedish(text){
+  const raw=text.trim(); const lower=raw.toLowerCase(); const now=new Date(); let day=new Date(now); day.setSeconds(0,0); let dateFound=false;
+  if(/\bövermorgon\b/.test(lower)){day.setDate(day.getDate()+2);dateFound=true}
+  else if(/\b(i\s*morgon|imorgon)\b/.test(lower)){day.setDate(day.getDate()+1);dateFound=true}
+  else if(/\bidag\b/.test(lower)){dateFound=true}
+  let m=lower.match(/\b(\d{1,2})\s+(januari|februari|mars|april|maj|juni|juli|augusti|september|oktober|november|december)(?:\s+(\d{4}))?/);
+  if(m){let y=m[3]?+m[3]:now.getFullYear();day=new Date(y,months[m[2]],+m[1],now.getHours(),now.getMinutes());if(day<now&&!m[3])day.setFullYear(y+1);dateFound=true}
+  if(!m){m=lower.match(/\b(\d{1,2})[\/.\-](\d{1,2})(?:[\/.\-](\d{2,4}))?\b/);if(m){let y=m[3]?+m[3]:now.getFullYear();if(y<100)y+=2000;day=new Date(y,+m[2]-1,+m[1],now.getHours(),now.getMinutes());if(day<now&&!m[3])day.setFullYear(y+1);dateFound=true}}
+  for(const [name,num] of Object.entries(weekdays)){if(new RegExp('\\b'+name+'\\b').test(lower)){day=nextWeekday(now,num,new RegExp('nästa\\s+'+name).test(lower));dateFound=true;break}}
+  let startH=null,startM=0,endH=null,endM=0;
+  m=lower.match(/\bfrån\s+(\d{1,2})(?:[:\.](\d{2}))?\s+(?:till|-)\s+(\d{1,2})(?:[:\.](\d{2}))?/);
+  if(m){startH=+m[1];startM=+(m[2]||0);endH=+m[3];endM=+(m[4]||0)}
+  if(startH===null){m=lower.match(/\b(?:klockan|kl\.?|vid)\s*(\d{1,2})(?:[:\.](\d{2}))?/);if(m){startH=+m[1];startM=+(m[2]||0)}}
+  if(startH===null){m=lower.match(/\b(\d{1,2})[:\.](\d{2})\b/);if(m){startH=+m[1];startM=+m[2]}}
+  if(startH===null||startH>23||startM>59) return {error:'Jag hörde datumet, men saknar en tydlig tid.',missing:'time'};
+  day.setHours(startH,startM,0,0); if(!dateFound && day<now) day.setDate(day.getDate()+1);
+  let end=new Date(day.getTime()+60*60000);
+  if(endH!==null){end=new Date(day);end.setHours(endH,endM,0,0);if(end<=day)end.setDate(end.getDate()+1)}
+  else {m=lower.match(/\b(?:i|under)\s+(\d+(?:[,.]\d+)?)\s*(timme|timmar|minut|minuter)\b/);if(m){let n=parseFloat(m[1].replace(',','.'));end=new Date(day.getTime()+n*(m[2].startsWith('tim')?3600000:60000))}}
+  return {title:cleanTitle(raw),start:day,end,raw};
+}
+function localIso(d){const z=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}:00`;}
+function graphIsoWithOffset(d){return d.toISOString();}
+function formatDate(d){return new Intl.DateTimeFormat('sv-SE',{day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'}).format(d).replace(' kl. ',' · ')}
+function reminderMinutes(start){const days=(start-Date.now())/86400000;if(days>=10)return 10*24*60;if(days>=3)return 3*24*60;if(days>=1)return 24*60;return 60;}
+async function findConflicts(ev){
+  const qs=new URLSearchParams({startDateTime:graphIsoWithOffset(ev.start),endDateTime:graphIsoWithOffset(ev.end),'$select':'id,subject,start,end,isCancelled'});
+  const data=await graph('/me/calendar/calendarView?'+qs.toString()); return (data.value||[]).filter(x=>!x.isCancelled);
+}
+async function createEvent(ev){
+  return graph('/me/calendar/events',{method:'POST',body:JSON.stringify({subject:ev.title,start:{dateTime:localIso(ev.start),timeZone:'Europe/Stockholm'},end:{dateTime:localIso(ev.end),timeZone:'Europe/Stockholm'},isReminderOn:true,reminderMinutesBeforeStart:reminderMinutes(ev.start)})});
+}
+async function deleteCreated(){if(!state.lastCreated)return resetUI();try{await graph('/me/events/'+encodeURIComponent(state.lastCreated.id),{method:'DELETE'});state.lastCreated=null;setOrb('neutral','Ångrat','','Kalenderposten togs bort','↶');setActions([{label:'OK',fn:resetUI}]);hint.textContent='Endast den senast skapade posten togs bort.'}catch(e){showError('Kunde inte ångra: '+e.message)}}
+function showSuccess(created,ev){state.lastCreated=created;setOrb('green',ev.title,formatDate(ev.start),'Tryck på den gröna cirkeln för OK','✓');setActions([{label:'Ångra',cls:'danger',fn:deleteCreated}]);hint.textContent='Sparad i Outlook-kalendern.'}
+function showConflict(ev,conflicts){state.pending=ev;let c=conflicts[0];setOrb('amber','Tiden är upptagen',ev.title,`Krockar med “${c.subject||'Befintlig aktivitet'}”`,'⚠');setActions([{label:'Lägg till ändå',fn:async()=>{setOrb('neutral','Sparar…');setActions();try{showSuccess(await createEvent(ev),ev)}catch(e){showError(e.message)}}},{label:'Avbryt',fn:resetUI}]);hint.textContent='Ingenting har lagts till ännu.'}
+function showError(msg){setOrb('amber','Något blev fel','',msg,'!');setActions([{label:'Försök igen',fn:resetUI}]);hint.textContent='Ingen kalenderpost skapades.'}
+async function handleSpeech(text){
+  const ev=parseSwedish(text); if(ev.error){setOrb('amber','Jag behöver mer info','',ev.error,'?');setActions([{label:'Försök igen',fn:startListening},{label:'Avbryt',fn:resetUI}]);return}
+  setOrb('neutral','Kontrollerar…',formatDate(ev.start),'Söker efter krockar','…');setActions();
+  try{const conflicts=await findConflicts(ev);if(conflicts.length)showConflict(ev,conflicts);else showSuccess(await createEvent(ev),ev)}catch(e){showError(e.message)}
+}
+function startListening(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){showError('Röstigenkänning stöds inte i den här webbläsaren. Prova Chrome på Android eller dator.');return}
+  const r=new SR();r.lang='sv-SE';r.interimResults=false;r.maxAlternatives=1;
+  r.onstart=()=>{state.listening=true;setOrb('neutral','Jag lyssnar…','','Säg aktivitet, datum och tid','●');setActions();hint.textContent='Exempel: “Tandläkaren nästa torsdag klockan 14.”'};
+  r.onresult=e=>{state.listening=false;const text=e.results[0][0].transcript;hint.textContent='Jag hörde: “'+text+'”';handleSpeech(text)};
+  r.onerror=e=>{state.listening=false;showError(e.error==='not-allowed'?'Mikrofonåtkomst nekades. Tillåt mikrofonen i webbläsaren.':'Jag hörde inte riktigt. Försök igen.');};
+  r.onend=()=>state.listening=false; r.start();
+}
+orb.onclick=()=>{if(orb.classList.contains('green'))return resetUI();if(orb.classList.contains('red')||orb.classList.contains('amber'))startListening();};
+$('#settingsBtn').onclick=()=>{$('#clientIdInput').value=localStorage.getItem('clientId')||'';$('#settingsDialog').showModal()};
+$('#saveSettings').onclick=()=>{const v=$('#clientIdInput').value.trim();if(v)localStorage.setItem('clientId',v);else localStorage.removeItem('clientId');setTimeout(()=>location.reload(),50)};
+if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
+initMsal();
+</script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "name":"Snabbkalender",
+  "short_name":"Kalender",
+  "start_url":"./",
+  "display":"standalone",
+  "background_color":"#0d0f10",
+  "theme_color":"#111315",
+  "lang":"sv-SE",
+  "description":"Tryck, prata, klart – lägg aktiviteter i Outlook-kalendern med rösten."
+}
