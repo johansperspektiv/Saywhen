@@ -1,10 +1,16 @@
 {
-  "name":"Snabbkalender",
-  "short_name":"Kalender",
-  "start_url":"./",
-  "display":"standalone",
-  "background_color":"#0d0f10",
-  "theme_color":"#111315",
-  "lang":"sv-SE",
-  "description":"Tryck, prata, klart – lägg aktiviteter i Outlook-kalendern med rösten."
+  "id": "/Saywhen/",
+  "name": "Saywhen",
+  "short_name": "Saywhen",
+  "start_url": "/Saywhen/",
+  "scope": "/Saywhen/",
+  "display": "standalone",
+  "background_color": "#0d0f10",
+  "theme_color": "#111315",
+  "lang": "sv-SE",
+  "description": "Tryck, prata, klart – lägg aktiviteter i Outlook-kalendern med rösten.",
+  "icons": [
+    {"src":"icon-192.png","sizes":"192x192","type":"image/png","purpose":"any maskable"},
+    {"src":"icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
+  ]
 }

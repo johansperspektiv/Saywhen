@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#111315" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>Snabbkalender</title>
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <title>Saywhen</title>
   <style>
     :root{color-scheme:dark;--bg:#0d0f10;--panel:#171a1c;--text:#f5f7f7;--muted:#aeb6b9;--red:#d62828;--green:#2a9d58;--amber:#e39a18;--line:#2a2e31}
     *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -28,7 +29,7 @@
 </head>
 <body>
 <main>
-  <div class="top"><div class="brand">Snabbkalender</div><div id="account" class="account">Inte ansluten</div></div>
+  <div class="top"><div class="brand">Saywhen</div><div id="account" class="account">Inte ansluten</div></div>
   <button id="orb" class="orb red" aria-label="Tryck och prata">
     <div id="orbIcon" class="mic">🎙️</div>
     <div id="orbTitle" class="big">Tryck och prata</div>
@@ -156,7 +157,7 @@ function startListening(){
 orb.onclick=()=>{if(orb.classList.contains('green'))return resetUI();if(orb.classList.contains('red')||orb.classList.contains('amber'))startListening();};
 $('#settingsBtn').onclick=()=>{$('#clientIdInput').value=localStorage.getItem('clientId')||'';$('#settingsDialog').showModal()};
 $('#saveSettings').onclick=()=>{const v=$('#clientIdInput').value.trim();if(v)localStorage.setItem('clientId',v);else localStorage.removeItem('clientId');setTimeout(()=>location.reload(),50)};
-if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
+if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js').then(r=>r.update()).catch(()=>{});}
 initMsal();
 </script>
 </body>
